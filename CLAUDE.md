@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 重要提醒
+**请使用中文回复用户的所有问题和交流！** 这是为了保持与用户的沟通一致性。
+
 ## Project Overview
 
 MediaCrawler is a multi-platform social media data collection tool that supports crawling public information from platforms like Xiaohongshu (Little Red Book), Douyin, Kuaishou, Bilibili, Weibo, Tieba, and Zhihu. The project uses Playwright for browser automation and maintains login states to access platform data without requiring JS reverse engineering.
