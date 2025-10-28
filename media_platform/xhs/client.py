@@ -10,23 +10,24 @@
 
 import asyncio
 import json
-import re
+import time
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlencode
 
 import httpx
 from playwright.async_api import BrowserContext, Page
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_result
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 import config
 from base.base_crawler import AbstractApiClient
 from tools import utils
-from html import unescape
+
 
 from .exception import DataFetchError, IPBlockError
 from .field import SearchNoteType, SearchSortType
 from .help import get_search_id, sign
 from .extractor import XiaoHongShuExtractor
+from .secsign import seccore_signv2_playwright
 
 
 class XiaoHongShuClient(AbstractApiClient):
@@ -63,15 +64,13 @@ class XiaoHongShuClient(AbstractApiClient):
         Returns:
 
         """
-        encrypt_params = await self.playwright_page.evaluate(
-            "([url, data]) => window._webmsxyw(url,data)", [url, data]
-        )
+        x_s = await seccore_signv2_playwright(self.playwright_page, url, data)
         local_storage = await self.playwright_page.evaluate("() => window.localStorage")
         signs = sign(
             a1=self.cookie_dict.get("a1", ""),
             b1=local_storage.get("b1", ""),
-            x_s=encrypt_params.get("X-s", ""),
-            x_t=str(encrypt_params.get("X-t", "")),
+            x_s=x_s,
+            x_t=str(int(time.time())),
         )
 
         headers = {
@@ -451,13 +450,26 @@ class XiaoHongShuClient(AbstractApiClient):
                 result.extend(comments)
         return result
 
-    async def get_creator_info(self, user_id: str) -> Dict:
+    async def get_creator_info(
+        self, user_id: str, xsec_token: str = "", xsec_source: str = ""
+    ) -> Dict:
         """
         通过解析网页版的用户主页HTML，获取用户个人简要信息
         PC端用户主页的网页存在window.__INITIAL_STATE__这个变量上的，解析它即可
-        eg: https://www.xiaohongshu.com/user/profile/59d8cb33de5fb4696bf17217
+
+        Args:
+            user_id: 用户ID
+            xsec_token: 验证token (可选,如果URL中包含此参数则传入)
+            xsec_source: 渠道来源 (可选,如果URL中包含此参数则传入)
+
+        Returns:
+            Dict: 创作者信息
         """
+        # 构建URI,如果有xsec参数则添加到URL中
         uri = f"/user/profile/{user_id}"
+        if xsec_token and xsec_source:
+            uri = f"{uri}?xsec_token={xsec_token}&xsec_source={xsec_source}"
+
         html_content = await self.request(
             "GET", self._domain + uri, return_response=True, headers=self.headers
         )
