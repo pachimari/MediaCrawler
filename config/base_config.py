@@ -9,7 +9,14 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 # 基础配置
-PLATFORM = "xhs"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
+from .zhihu_config import *
+from .tieba_config import *
+from .weibo_config import *
+from .ks_config import *
+from .dy_config import *
+from .xhs_config import *
+from .bilibili_config import *
+PLATFORM = "dy"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
 KEYWORDS = "编程副业,编程兼职"  # 关键词搜索配置，以英文逗号分隔
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
@@ -83,7 +90,7 @@ ENABLE_GET_MEIDAS = False
 ENABLE_GET_COMMENTS = True
 
 # 爬取一级评论的数量控制(单视频/帖子)
-CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = 10
+CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = 100
 
 # 是否开启爬二级评论模式, 默认不开启爬二级评论
 # 老版本项目使用了 db, 则需参考 schema/tables.sql line 287 增加表字段
@@ -107,11 +114,3 @@ FONT_PATH = "./docs/STZHONGS.TTF"
 
 # 爬取间隔时间
 CRAWLER_MAX_SLEEP_SEC = 2
-
-from .bilibili_config import *
-from .xhs_config import *
-from .dy_config import *
-from .ks_config import *
-from .weibo_config import *
-from .tieba_config import *
-from .zhihu_config import *

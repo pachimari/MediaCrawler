@@ -1,0 +1,89 @@
+{
+    "name": "抖音数据查询 - 大整数修复版",
+    "nodes": [{
+            "name": "方案1: 使用字符串参数(推荐)",
+            "type": "n8n-nodes-base.code",
+            "parameters": {
+                "jsCode": "// 将 aweme_id 作为字符串传递\nreturn [{\n  json: {\n    db_path: \"O:/ai/2025AIAgent/MediaCrawler/database/sqlite_tables.db\",\n    sql: \"SELECT * FROM douyin_aweme WHERE aweme_id = ?\",\n    params: [\"7554322613938523407\"]  // 字符串类型\n  }\n}];"
+            },
+            "position": [250, 300]
+        },
+        {
+            "name": "方案2: 使用CAST转换",
+            "type": "n8n-nodes-base.code",
+            "parameters": {
+                "jsCode": "// 在 SQL 中使用 CAST 转换\nreturn [{\n  json: {\n    db_path: \"O:/ai/2025AIAgent/MediaCrawler/database/sqlite_tables.db\",\n    sql: \"SELECT * FROM douyin_aweme WHERE CAST(aweme_id AS TEXT) = ?\",\n    params: [\"7554322613938523407\"]  // 字符串类型\n  }\n}];"
+            },
+            "position": [250, 500]
+        },
+        {
+            "name": "方案3: SQL硬编码",
+            "type": "n8n-nodes-base.code",
+            "parameters": {
+                "jsCode": "// 直接在 SQL 中写入 ID\nreturn [{\n  json: {\n    db_path: \"O:/ai/2025AIAgent/MediaCrawler/database/sqlite_tables.db\",\n    sql: \"SELECT * FROM douyin_aweme WHERE aweme_id = 7554322613938523407\",\n    params: []  // 不使用参数\n  }\n}];"
+            },
+            "position": [250, 700]
+        },
+        {
+            "name": "查询数据库",
+            "type": "n8n-nodes-base.httpRequest",
+            "parameters": {
+                "method": "POST",
+                "url": "http://localhost:5000/db/query",
+                "jsonParameters": true,
+                "options": {},
+                "bodyParametersJson": "={{ $json }}"
+            },
+            "position": [500, 300]
+        },
+        {
+            "name": "检查结果",
+            "type": "n8n-nodes-base.code",
+            "parameters": {
+                "jsCode": "const result = $input.first().json;\n\nif (!result.success) {\n  throw new Error('查询失败');\n}\n\nif (result.count === 0) {\n  throw new Error('未找到数据 - 可能是大整数精度问题');\n}\n\n// 检查返回的 aweme_id 是否完整\nconst awemeId = result.data[0].aweme_id;\nconst expectedEnd = '407';  // 正确的末尾\n\nif (String(awemeId).endsWith(expectedEnd)) {\n  console.log('✓ aweme_id 完整:', awemeId);\n} else {\n  console.warn('⚠️ aweme_id 精度丢失:', awemeId, '(应该以', expectedEnd, '结尾)');\n}\n\nreturn result.data.map(item => ({ json: item }));"
+            },
+            "position": [750, 300]
+        },
+        {
+            "name": "动态参数示例",
+            "type": "n8n-nodes-base.code",
+            "parameters": {
+                "jsCode": "// 如果 aweme_id 来自上游节点\nconst awemeId = $json.aweme_id || '7554322613938523407';\n\n// 确保转为字符串\nconst awemeIdStr = String(awemeId);\n\nreturn [{\n  json: {\n    db_path: \"O:/ai/2025AIAgent/MediaCrawler/database/sqlite_tables.db\",\n    sql: \"SELECT * FROM douyin_aweme WHERE aweme_id = ?\",\n    params: [awemeIdStr]  // 始终使用字符串\n  }\n}];"
+            },
+            "position": [250, 900]
+        },
+        {
+            "name": "批量查询示例",
+            "type": "n8n-nodes-base.code",
+            "parameters": {
+                "jsCode": "// 批量查询多个 aweme_id\nconst awemeIds = [\n  '7554322613938523407',\n  '7555301991056985378',\n  '7561675205911940402'\n];\n\n// 使用 IN 子句\nconst placeholders = awemeIds.map(() => '?').join(',');\nconst sql = `SELECT * FROM douyin_aweme WHERE aweme_id IN (${placeholders})`;\n\nreturn [{\n  json: {\n    db_path: \"O:/ai/2025AIAgent/MediaCrawler/database/sqlite_tables.db\",\n    sql: sql,\n    params: awemeIds  // 字符串数组\n  }\n}];"
+            },
+            "position": [250, 1100]
+        }
+    ],
+    "connections": {
+        "方案1: 使用字符串参数(推荐)": {
+            "main": [
+                [{
+                    "node": "查询数据库",
+                    "type": "main",
+                    "index": 0
+                }]
+            ]
+        },
+        "查询数据库": {
+            "main": [
+                [{
+                    "node": "检查结果",
+                    "type": "main",
+                    "index": 0
+                }]
+            ]
+        }
+    },
+    "settings": {},
+    "staticData": null,
+    "meta": {
+        "description": "解决 JavaScript 大整数精度问题的 n8n 工作流示例"
+    }
+}

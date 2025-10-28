@@ -1,0 +1,334 @@
+{
+    "name": "评论引导截流系统",
+    "nodes": [{
+            "id": "webhook_trigger",
+            "type": "n8n-nodes-base.webhook",
+            "name": "飞书表格Webhook",
+            "parameters": {
+                "path": "video-submit",
+                "method": "POST"
+            },
+            "position": [250, 300]
+        },
+        {
+            "id": "extract_video_id",
+            "type": "n8n-nodes-base.function",
+            "name": "提取视频ID",
+            "parameters": {
+                "functionCode": "const videoUrl = $input.item.json.video_url;\nconst videoId = videoUrl.match(/\\/video\\/(\\d+)/)?.[1];\nreturn { video_id: videoId, platform: 'douyin' };"
+            },
+            "position": [450, 300]
+        },
+        {
+            "id": "call_crawler",
+            "type": "n8n-nodes-base.httpRequest",
+            "name": "调用MediaCrawler",
+            "parameters": {
+                "url": "http://localhost:8000/crawl",
+                "method": "POST",
+                "bodyParameters": {
+                    "parameters": [{
+                            "name": "platform",
+                            "value": "={{ $json.platform }}"
+                        },
+                        {
+                            "name": "video_id",
+                            "value": "={{ $json.video_id }}"
+                        },
+                        {
+                            "name": "get_comments",
+                            "value": "true"
+                        }
+                    ]
+                }
+            },
+            "position": [650, 300]
+        },
+        {
+            "id": "sqlite_save",
+            "type": "n8n-nodes-base.sqlite",
+            "name": "保存到SQLite",
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO raw_comments (user_id, nickname, comment_text, video_id) VALUES (?, ?, ?, ?)"
+            },
+            "position": [850, 300]
+        },
+        {
+            "id": "ai_scoring",
+            "type": "n8n-nodes-base.openAi",
+            "name": "AI意向评分",
+            "parameters": {
+                "resource": "text",
+                "operation": "message",
+                "model": "gpt-4o",
+                "messages": {
+                    "values": [{
+                            "role": "system",
+                            "content": "你是旅游意向分析专家。分析评论并输出JSON格式评分。"
+                        },
+                        {
+                            "role": "user",
+                            "content": "评论内容: {{ $json.comment_text }}\n昵称: {{ $json.nickname }}\n视频主题: {{ $json.video_topic }}\n\n请评估用户的旅游意向(0-100分),并分析目的地、出行时间、预算等信息。"
+                        }
+                    ]
+                },
+                "options": {
+                    "temperature": 0.3,
+                    "responseFormat": "json_object"
+                }
+            },
+            "position": [1050, 300]
+        },
+        {
+            "id": "filter_high_score",
+            "type": "n8n-nodes-base.if",
+            "name": "筛选高分用户",
+            "parameters": {
+                "conditions": {
+                    "number": [{
+                        "value1": "={{ $json.score }}",
+                        "operation": "larger",
+                        "value2": 50
+                    }]
+                }
+            },
+            "position": [1250, 300]
+        },
+        {
+            "id": "select_account",
+            "type": "n8n-nodes-base.function",
+            "name": "选择账号",
+            "parameters": {
+                "functionCode": "// 简单的账号选择逻辑\nconst accounts = [\n  {id: 'acc1', role: '小鹿', quota: 5, used: 2},\n  {id: 'acc2', role: '阿强', quota: 5, used: 0},\n  {id: 'acc3', role: 'Emma', quota: 5, used: 5}\n];\n\nconst available = accounts.filter(a => a.used < a.quota);\nif (available.length === 0) return null;\n\nconst selected = available[0];\nreturn { account_id: selected.id, role_name: selected.role };"
+            },
+            "position": [1450, 250]
+        },
+        {
+            "id": "generate_comment",
+            "type": "n8n-nodes-base.openAi",
+            "name": "生成话术",
+            "parameters": {
+                "resource": "text",
+                "operation": "message",
+                "model": "gpt-4o",
+                "messages": {
+                    "values": [{
+                            "role": "system",
+                            "content": "你是{{ $json.role_name }},一个{{ $json.role_persona }}。生成自然的评论回复,引导用户主动私信。"
+                        },
+                        {
+                            "role": "user",
+                            "content": "用户评论: {{ $json.comment_text }}\n目的地: {{ $json.destination }}\n\n生成3条不同风格的引导性回复,不要直接留联系方式。"
+                        }
+                    ]
+                },
+                "options": {
+                    "temperature": 0.8
+                }
+            },
+            "position": [1650, 250]
+        },
+        {
+            "id": "risk_check",
+            "type": "n8n-nodes-base.function",
+            "name": "风险检测",
+            "parameters": {
+                "functionCode": "const comment = $json.generated_comment;\nconst sensitiveWords = ['微信', 'VX', 'wx', 'QQ', '电话'];\nconst hasSensitive = sensitiveWords.some(w => comment.includes(w));\nreturn { is_safe: !hasSensitive, comment };"
+            },
+            "position": [1850, 250]
+        },
+        {
+            "id": "schedule_task",
+            "type": "n8n-nodes-base.sqlite",
+            "name": "创建发布任务",
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO comment_tasks (task_id, user_id, account_id, comment_text, scheduled_time, status) VALUES (?, ?, ?, ?, datetime('now', '+2 hours'), 'pending')"
+            },
+            "position": [2050, 250]
+        },
+        {
+            "id": "update_feishu",
+            "type": "n8n-nodes-base.httpRequest",
+            "name": "更新飞书表格",
+            "parameters": {
+                "url": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $json.app_token }}/tables/{{ $json.table_id }}/records",
+                "method": "POST",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "feishuApi",
+                "bodyParameters": {
+                    "parameters": [{
+                        "name": "fields",
+                        "value": {
+                            "用户昵称": "={{ $json.nickname }}",
+                            "评分": "={{ $json.score }}",
+                            "目的地": "={{ $json.destination }}",
+                            "优先级": "={{ $json.priority }}",
+                            "话术": "={{ $json.comment_text }}",
+                            "状态": "待发布"
+                        }
+                    }]
+                }
+            },
+            "position": [2250, 250]
+        },
+        {
+            "id": "cron_executor",
+            "type": "n8n-nodes-base.cron",
+            "name": "定时执行器",
+            "parameters": {
+                "triggerTimes": {
+                    "item": [{
+                        "mode": "everyX",
+                        "value": 30,
+                        "unit": "minutes"
+                    }]
+                }
+            },
+            "position": [250, 600]
+        },
+        {
+            "id": "fetch_pending_tasks",
+            "type": "n8n-nodes-base.sqlite",
+            "name": "获取待发布任务",
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "SELECT * FROM comment_tasks WHERE status='pending' AND scheduled_time <= datetime('now') LIMIT 10"
+            },
+            "position": [450, 600]
+        },
+        {
+            "id": "publish_comment",
+            "type": "n8n-nodes-base.httpRequest",
+            "name": "发布评论(API)",
+            "parameters": {
+                "url": "http://localhost:8000/publish-comment",
+                "method": "POST",
+                "bodyParameters": {
+                    "parameters": [{
+                            "name": "account_id",
+                            "value": "={{ $json.account_id }}"
+                        },
+                        {
+                            "name": "video_id",
+                            "value": "={{ $json.video_id }}"
+                        },
+                        {
+                            "name": "comment_text",
+                            "value": "={{ $json.comment_text }}"
+                        }
+                    ]
+                }
+            },
+            "position": [650, 600]
+        },
+        {
+            "id": "update_task_status",
+            "type": "n8n-nodes-base.sqlite",
+            "name": "更新任务状态",
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "UPDATE comment_tasks SET status='published', published_at=datetime('now') WHERE task_id=?"
+            },
+            "position": [850, 600]
+        }
+    ],
+    "connections": {
+        "webhook_trigger": {
+            "main": [
+                [{
+                    "node": "extract_video_id"
+                }]
+            ]
+        },
+        "extract_video_id": {
+            "main": [
+                [{
+                    "node": "call_crawler"
+                }]
+            ]
+        },
+        "call_crawler": {
+            "main": [
+                [{
+                    "node": "sqlite_save"
+                }]
+            ]
+        },
+        "sqlite_save": {
+            "main": [
+                [{
+                    "node": "ai_scoring"
+                }]
+            ]
+        },
+        "ai_scoring": {
+            "main": [
+                [{
+                    "node": "filter_high_score"
+                }]
+            ]
+        },
+        "filter_high_score": {
+            "main": [
+                [{
+                    "node": "select_account"
+                }],
+                []
+            ]
+        },
+        "select_account": {
+            "main": [
+                [{
+                    "node": "generate_comment"
+                }]
+            ]
+        },
+        "generate_comment": {
+            "main": [
+                [{
+                    "node": "risk_check"
+                }]
+            ]
+        },
+        "risk_check": {
+            "main": [
+                [{
+                    "node": "schedule_task"
+                }]
+            ]
+        },
+        "schedule_task": {
+            "main": [
+                [{
+                    "node": "update_feishu"
+                }]
+            ]
+        },
+        "cron_executor": {
+            "main": [
+                [{
+                    "node": "fetch_pending_tasks"
+                }]
+            ]
+        },
+        "fetch_pending_tasks": {
+            "main": [
+                [{
+                    "node": "publish_comment"
+                }]
+            ]
+        },
+        "publish_comment": {
+            "main": [
+                [{
+                    "node": "update_task_status"
+                }]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1"
+    }
+}

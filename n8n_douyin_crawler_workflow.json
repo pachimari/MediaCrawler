@@ -1,0 +1,194 @@
+{
+    "name": "抖音爬虫自动化工作流",
+    "nodes": [{
+            "parameters": {},
+            "id": "start-node",
+            "name": "手动触发",
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [250, 300]
+        },
+        {
+            "parameters": {
+                "values": {
+                    "string": [{
+                            "name": "video_ids",
+                            "value": "7554322613938523407"
+                        },
+                        {
+                            "name": "save_option",
+                            "value": "sqlite"
+                        },
+                        {
+                            "name": "login_type",
+                            "value": "qrcode"
+                        }
+                    ],
+                    "number": [{
+                            "name": "comment_count",
+                            "value": 100
+                        },
+                        {
+                            "name": "sub_comment",
+                            "value": 0
+                        }
+                    ]
+                }
+            },
+            "id": "set-params",
+            "name": "设置爬取参数",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 1,
+            "position": [450, 300]
+        },
+        {
+            "parameters": {
+                "command": "cd O:\\ai\\2025AIAgent\\MediaCrawler && python n8n_crawler_wrapper.py --video-ids \"={{ $json.video_ids }}\" --comment-count {{ $json.comment_count }} --sub-comment {{ $json.sub_comment }} --save-option {{ $json.save_option }} --login-type {{ $json.login_type }}"
+            },
+            "id": "execute-crawler",
+            "name": "执行爬虫",
+            "type": "n8n-nodes-base.executeCommand",
+            "typeVersion": 1,
+            "position": [650, 300]
+        },
+        {
+            "parameters": {
+                "jsCode": "// 读取 SQLite 数据库统计\nconst { exec } = require('child_process');\nconst util = require('util');\nconst execPromise = util.promisify(exec);\n\nconst dbPath = 'O:\\\\ai\\\\2025AIAgent\\\\MediaCrawler\\\\database\\\\sqlite_tables.db';\n\n// 查询今日爬取的评论数量\nconst countQuery = `SELECT COUNT(*) as count FROM douyin_aweme_comment WHERE DATE(create_time) = DATE('now')`;\n\ntry {\n  const { stdout: countResult } = await execPromise(`sqlite3 \"${dbPath}\" \"${countQuery}\"`);\n  const count = parseInt(countResult.trim());\n  \n  // 查询最新的10条评论\n  const dataQuery = `SELECT aweme_id, content, create_time, ip_location FROM douyin_aweme_comment ORDER BY create_time DESC LIMIT 10`;\n  const { stdout: dataResult } = await execPromise(`sqlite3 \"${dbPath}\" \"${dataQuery}\" -json`);\n  const latestComments = JSON.parse(dataResult || '[]');\n  \n  return [{\n    json: {\n      success: true,\n      total_count: count,\n      crawl_time: new Date().toISOString(),\n      latest_comments: latestComments,\n      params: $input.item.json\n    }\n  }];\n} catch (error) {\n  return [{\n    json: {\n      success: false,\n      error: error.message,\n      crawl_time: new Date().toISOString()\n    }\n  }];\n}"
+            },
+            "id": "read-results",
+            "name": "读取爬取结果",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [850, 300]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [{
+                        "value1": "={{ $json.success }}",
+                        "value2": true
+                    }]
+                }
+            },
+            "id": "check-success",
+            "name": "检查执行状态",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [1050, 300]
+        },
+        {
+            "parameters": {
+                "values": {
+                    "string": [{
+                            "name": "status",
+                            "value": "✅ 爬取成功"
+                        },
+                        {
+                            "name": "message",
+                            "value": "=今日共爬取 {{ $json.total_count }} 条评论"
+                        },
+                        {
+                            "name": "details",
+                            "value": "=视频ID: {{ $json.params.video_ids }}\\n评论数: {{ $json.params.comment_count }}\\n保存方式: {{ $json.params.save_option }}\\n执行时间: {{ $json.crawl_time }}"
+                        }
+                    ]
+                }
+            },
+            "id": "success-message",
+            "name": "成功消息",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 1,
+            "position": [1250, 200]
+        },
+        {
+            "parameters": {
+                "values": {
+                    "string": [{
+                            "name": "status",
+                            "value": "❌ 爬取失败"
+                        },
+                        {
+                            "name": "error",
+                            "value": "={{ $json.error }}"
+                        },
+                        {
+                            "name": "time",
+                            "value": "={{ $json.crawl_time }}"
+                        }
+                    ]
+                }
+            },
+            "id": "error-message",
+            "name": "失败消息",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 1,
+            "position": [1250, 400]
+        }
+    ],
+    "connections": {
+        "手动触发": {
+            "main": [
+                [{
+                    "node": "设置爬取参数",
+                    "type": "main",
+                    "index": 0
+                }]
+            ]
+        },
+        "设置爬取参数": {
+            "main": [
+                [{
+                    "node": "执行爬虫",
+                    "type": "main",
+                    "index": 0
+                }]
+            ]
+        },
+        "执行爬虫": {
+            "main": [
+                [{
+                    "node": "读取爬取结果",
+                    "type": "main",
+                    "index": 0
+                }]
+            ]
+        },
+        "读取爬取结果": {
+            "main": [
+                [{
+                    "node": "检查执行状态",
+                    "type": "main",
+                    "index": 0
+                }]
+            ]
+        },
+        "检查执行状态": {
+            "main": [
+                [{
+                    "node": "成功消息",
+                    "type": "main",
+                    "index": 0
+                }],
+                [{
+                    "node": "失败消息",
+                    "type": "main",
+                    "index": 0
+                }]
+            ]
+        }
+    },
+    "settings": {},
+    "staticData": null,
+    "tags": [{
+            "name": "爬虫",
+            "id": "crawler"
+        },
+        {
+            "name": "抖音",
+            "id": "douyin"
+        }
+    ],
+    "triggerCount": 0,
+    "updatedAt": "2025-01-17T12:00:00.000Z",
+    "versionId": "1"
+}
